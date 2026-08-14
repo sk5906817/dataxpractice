@@ -1,21 +1,46 @@
-create file format ff_csv
-type=csv
-skip_header=1
-field_delimiter=','
-trim_space=True
+INSERT INTO DATAXPRACTICE_DB.SILVER.ORDERS_DEDUP (ORDER_ID, CUSTOMER_ID, PRODUCT_ID, ORDER_TS, ORDER_AMOUNT, ORDER_STATUS, INGESTION_TIMESTAMP)
+VALUES
+    (1017, 'C002', 'P101', '2026-01-05 15:30:00.000', 499.00,  'PLACED',    CURRENT_TIMESTAMP()),
+    (1018, 'C004', 'P104', '2026-01-05 16:05:00.000', 2199.00, 'PLACED',    CURRENT_TIMESTAMP()),
+    (1019, 'C003', 'P101', '2026-01-05 17:12:00.000', 499.00,  'SHIPPED',   CURRENT_TIMESTAMP()),
+    (1020, 'C005', 'P103', '2026-01-05 18:45:00.000', 899.00,  'CANCELLED', CURRENT_TIMESTAMP()),
+    (1021, 'C002', 'P102', '2026-01-05 19:20:00.000', 1299.00, 'PLACED',    CURRENT_TIMESTAMP());
 
-create or replace stage stg_orders
-file_format=ff_csv
-
-create or replace stage stg_customers
-file_format=ff_csv
-
-CREATE OR REPLACE TABLE customers_raw (
-  customer_id STRING,
-  customer_name STRING,
-  email STRING,
-  city STRING,
-  updated_at TIMESTAMP_NTZ
+CREATE OR REPLACE TASK task_merge_orders
+WAREHOUSE=COMPUTE_WH
+SCHEDULE='1 MINUTE'
+AS
+MERGE INTO gold.fact_orders t
+USING SILVER.st_orders s
+ON t.order_id=s.order_id
+WHEN MATCHED THEN UPDATE SET
+t.order_status=s.order_status,
+t._loaded_at=CURRENT_TIMESTAMP()
+WHEN NOT MATCHED THEN 
+INSERT VALUES(
+s.order_id,s.customer_id,DATE(s.order_ts),s.order_ts,
+s.order_amount,s.order_status,CURRENT_TIMESTAMP()
 );
 
-select * from customers_raw
+alter task DATAXPRACTICE_DB.PUBLIC.TASK_MERGE_ORDERS suspend;
+
+
+SELECT * FROM gold.fact_orders
+
+SHOW TASKS LIKE 'TASK_MERGE_ORDERS';
+
+CREATE OR REPLACE TABLE fact_orders (
+  order_id       NUMBER,
+  customer_id    STRING,
+  order_date     DATE,
+  order_ts       STRING,
+  order_amount   STRING,
+  order_status   STRING,
+  _loaded_at     STRING
+);
+
+SELECT *
+FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY())
+WHERE NAME ILIKE '%TASK_MERGE_ORDERS%'
+ORDER BY SCHEDULED_TIME DESC
+LIMIT 10;
