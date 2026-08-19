@@ -1,50 +1,47 @@
-ALTER TABLE IF EXISTS CUSTOMERS MODIFY COLUMN full_name 
-SET MASKING POLICY phone;
-ALTER TABLE IF EXISTS CUSTOMERS MODIFY COLUMN phone
-SET MASKING POLICY phone;
+USE ROLE ACCOUNTADMIN;
 
-use role analyst_masked
-select * from customers
+create or replace masking policy emails as (val varchar) returns varchar ->
+case
+  when current_role() in ('ANALYST_FULL') then val
+  when current_role() in ('ANALYST_MASKED') then regexp_replace(val,'.+\@','*****@') -- leave email domain unmasked
+  else '********'
+end;
 
-SELECT * FROM table(information_schema.policy_references(policy_name=>'phone'));
+alter table customers modify column email set masking policy emails
 
-ALTER TABLE IF EXISTS CUSTOMERS MODIFY COLUMN phone 
-UNSET MASKING POLICY;
-use role analyst_masked;
-select * from customers;
-
-
-create or replace masking policy names as (val varchar) returns varchar ->
-            case
-            when current_role() in ('ANALYST_FULL', 'ACCOUNTADMIN') then val
-            else CONCAT(LEFT(val,2),'*******')
-            end;
-
-alter table customers modify column full_name
-set masking policy names
-
-use role analyst_masked;
-select * from customers
-
-create or replace masking policy phone as (val varchar) returns varchar ->
-            case
-            when current_role() in ('ANALYST_FULL', 'ACCOUNTADMIN') then val
-            else CONCAT(LEFT(val,2),'*******')
-            end;
-
-alter table customers modify column phone set masking policy phone
-
+USE ROLE ANALYST_FULL;
+SELECT * FROM CUSTOMERS;
 
 USE ROLE ANALYST_MASKED;
 SELECT * FROM CUSTOMERS;
 
-use role accountadmin
+USE ROLE ACCOUNTADMIN
 
-alter masking policy phone set body ->
-case        
- when current_role() in ('ANALYST_FULL', 'ACCOUNTADMIN') then val
- else '**-**-**'
- end;
+create or replace masking policy sha2 as (val varchar) returns varchar ->
+case 
+    when current_role() in ('ANALYST_FULL') then val
+    else sha2(val) --return hash of the column value
+end
 
-USE ROLE ANALYST_MASKED;
-SELECT * FROM CUSTOMERS; 
+alter table if exists customers modify column full_name 
+set masking policy sha2
+
+use role analyst_full;
+select * from customers;
+
+use role analyst_masked;
+select * from customers;
+
+use role accountadmin;
+alter table customers modify column email 
+unset masking policy
+
+create or replace masking policy dates as (val date) returns date ->
+case 
+    when current_role() in ('ANALYST_FULL') then val
+    else date_from_parts(0001,01,01)::date 
+end
+
+alter table customers modify column create_date
+set masking policy dates
+
